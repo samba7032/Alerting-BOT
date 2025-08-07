@@ -1,2 +1,2 @@
-worker: python3 main.py
+start: python main.py
 
