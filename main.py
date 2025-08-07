@@ -12,7 +12,6 @@ from zoneinfo import ZoneInfo
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
-
 app = None
 signal_cache = {}
 
@@ -21,8 +20,8 @@ def load_all_nse_symbols(csv_path='EQUITY_L.csv'):
     print("📅 Loading NSE stock list from local CSV...")
     try:
         df = pd.read_csv(csv_path)
-        df.columns = df.columns.str.strip()  # 🧹 Remove leading/trailing whitespace
-        df = df[df['SERIES'] == 'EQ']  # Only EQ series
+        df.columns = df.columns.str.strip()
+        df = df[df['SERIES'] == 'EQ']
         symbols = df['SYMBOL'].unique().tolist()
         print(f"✅ Loaded {len(symbols)} NSE symbols.")
         return [symbol + '.NS' for symbol in symbols]
@@ -38,7 +37,7 @@ async def send_alert(message):
 # === Check if Indian Market is Open ===
 def is_market_open():
     now = datetime.now(ZoneInfo("Asia/Kolkata"))
-    return now.weekday() < 5 and dtime(9, 15) <= now.time() <= dtime(16, 30)
+    return now.weekday() < 5 and dtime(9, 15) <= now.time() <= dtime(17, 30)
 
 # === Buy/Sell Signal Calculation ===
 def calculate_signal_score(rsi, prev_rsi, price, sma, macd_line, signal_line, volume, avg_volume):
@@ -100,11 +99,8 @@ async def check_signal(symbol):
         if data.empty or len(data) < 25:
             return
 
-        close_array = data['Close'].values.squeeze()
-        volume_array = data['Volume'].values.squeeze()
-
-        close = pd.Series(close_array, index=data.index)
-        volume = pd.Series(volume_array, index=data.index)
+        close = data['Close']
+        volume = data['Volume']
 
         rsi = ta.momentum.RSIIndicator(close=close, window=14).rsi()
         macd = ta.trend.MACD(close=close)
@@ -178,15 +174,23 @@ async def main():
     global app
     symbols = load_all_nse_symbols()
     app = ApplicationBuilder().token(TELEGRAM_TOKEN).build()
-    await send_alert("✅ Bot Started. Monitoring stocks...")
 
-    while True:
-        if is_market_open():
-            tasks = [check_signal(symbol) for symbol in symbols]
-            await asyncio.gather(*tasks)
-        else:
-            print(f"[{datetime.now().strftime('%H:%M:%S')}] 💤 Market closed. Waiting...")
-        await asyncio.sleep(60)
+    await app.initialize()
+    await app.start()
+
+    await app.bot.send_message(chat_id=CHAT_ID, text="✅ Bot Started. Monitoring stocks...", parse_mode=ParseMode.HTML)
+
+    try:
+        while True:
+            if is_market_open():
+                tasks = [check_signal(symbol) for symbol in symbols]
+                await asyncio.gather(*tasks)
+            else:
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] 💤 Market closed. Waiting...")
+            await asyncio.sleep(60)
+    finally:
+        await app.stop()
+        await app.shutdown()
 
 # === Run the Bot ===
 if __name__ == "__main__":
